@@ -1,3 +1,6 @@
+Student Name: Mirza AVCI
+Student Number: L00205909
+
 Part A-1 : AWS CloudFormation and Automated S3 Website Deployment
 
 1. Project Overview
