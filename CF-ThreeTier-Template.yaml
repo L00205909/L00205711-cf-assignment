@@ -1,0 +1,356 @@
+Parameters:  
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
+  
+  DBUsername:
+    Type: String
+    Default: admin
+    Description: Master username for MySQL database
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    Description: Master password for MySQL database
+
+Resources:
+  ThreeTierVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+       - Key: Name
+         Value: ThreeTier-VPC
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: eu-north-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-A
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: eu-north-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-B
+
+  PrivateAppA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: eu-north-1a
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private-App-A
+  PrivateAppB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: eu-north-1b
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private-App-B
+
+  PrivateDBA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.21.0/24
+      AvailabilityZone: eu-north-1a
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private-DB-A
+
+  PrivateDBB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      CidrBlock: 10.0.22.0/24
+      AvailabilityZone: eu-north-1b
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private-DB-B
+
+  ThreeTierIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ThreeTier-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      InternetGatewayId:
+        Ref: ThreeTierIGW
+
+  ThreeTierPublicRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      Tags:
+        - Key: Name
+          Value: ThreeTier-Public-RT
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId:
+        Ref: ThreeTierPublicRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: ThreeTierIGW
+
+  PublicSubnetAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnetA
+      RouteTableId:
+        Ref: ThreeTierPublicRT
+
+  PublicSubnetAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicSubnetB
+      RouteTableId:
+        Ref: ThreeTierPublicRT
+  ThreeTierPrivateRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: ThreeTierVPC
+      Tags:
+        - Key: Name
+          Value: ThreeTier-Private-RT
+  PrivateSubnetAssociationAppA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateAppA
+      RouteTableId:
+        Ref: ThreeTierPrivateRT
+  PrivateSubnetAssociationAppB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateAppB
+      RouteTableId:
+        Ref: ThreeTierPrivateRT
+  PrivateSubnetAssociationDBA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateDBA
+      RouteTableId:
+        Ref: ThreeTierPrivateRT
+  PrivateSubnetAssociationDBB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateDBB
+      RouteTableId:
+        Ref: ThreeTierPrivateRT
+  ThreeTierALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow public HTTP traffic to ALB
+      VpcId:
+        Ref: ThreeTierVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ThreeTier-ALB-SG
+  ThreeTierAppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic from ALB only
+      VpcId:
+        Ref: ThreeTierVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId:
+            Ref: ThreeTierALBSG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ThreeTier-App-SG
+  ThreeTierDBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL traffic from App servers only
+      VpcId:
+        Ref: ThreeTierVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId:
+            Ref: ThreeTierAppSG
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: ThreeTier-DB-SG
+  ThreeTierAppTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      Name: ThreeTier-App-TG
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      VpcId: 
+        Ref: ThreeTierVPC
+      Targets:
+        - Id:
+            Ref: EC2AppA
+          Port: 80
+        - Id:
+            Ref: EC2AppB
+          Port: 80
+  ThreeTierALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - PublicRoute
+      - PublicSubnetAssociationA
+      - PublicSubnetAssociationB
+    Properties:
+      Name: ThreeTier-ALB
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - Ref: PublicSubnetA
+        - Ref: PublicSubnetB
+      SecurityGroups:
+        - Ref: ThreeTierALBSG
+      Tags:
+        - Key: Name
+          Value: ThreeTier-ALB
+  ThreeTierALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: ThreeTierAppTG
+      LoadBalancerArn:
+        Ref: ThreeTierALB
+      Port: 80
+      Protocol: HTTP
+  EC2AppA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: LatestAmiId
+      InstanceType: t3.micro
+      EbsOptimized: true
+      SubnetId:
+        Ref: PrivateAppA
+      SecurityGroupIds:
+        - Ref: ThreeTierAppSG
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      Tags:
+        - Key: Name
+          Value: EC2-A
+  EC2AppB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: LatestAmiId
+      InstanceType: t3.micro
+      EbsOptimized: true
+      SubnetId:
+        Ref: PrivateAppB
+      SecurityGroupIds:
+        - Ref: ThreeTierAppSG
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      Tags:
+        - Key: Name
+          Value: EC2-B
+  ThreeTierDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for Three Tier Database
+      SubnetIds:
+        - Ref: PrivateDBA
+        - Ref: PrivateDBB
+      Tags:
+        - Key: Name
+          Value: ThreeTier-DB-SubnetGroup  
+  ThreeTierDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: three-tier-mysql-db
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: ThreeTierDB
+      MasterUsername:
+        Ref: DBUsername
+      MasterUserPassword:
+        Ref: DBPassword
+      DBSubnetGroupName:
+        Ref: ThreeTierDBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: ThreeTierDBSG
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 0
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: ThreeTier-MySQL-DB    
